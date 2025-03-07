@@ -1,0 +1,697 @@
+classdef BrushPenPlotterCAM < matlab.apps.AppBase
+
+    % Properties that correspond to app components
+    properties (Access = public)
+        UIFigure                      matlab.ui.Figure
+        Menu                          matlab.ui.container.Menu
+        Menu_Open                     matlab.ui.container.Menu
+        Menu_OverwriteSave            matlab.ui.container.Menu
+        Menu_SaveWithName             matlab.ui.container.Menu
+        EndTypeDropDown               matlab.ui.control.DropDown
+        EndTypeDropDownLabel          matlab.ui.control.Label
+        GenNCProgButton               matlab.ui.control.Button
+        MoveLinePreviousStrokeButton  matlab.ui.control.Button
+        MoveLineNextStrokeButton      matlab.ui.control.Button
+        LineDownWithinStrokeButton    matlab.ui.control.Button
+        LineUpWithinStrokeButton      matlab.ui.control.Button
+        MoveLineNewStrokeButton       matlab.ui.control.Button
+        StrokeDownButton              matlab.ui.control.Button
+        StrokeUpButton                matlab.ui.control.Button
+        InvDirectionButton            matlab.ui.control.Button
+        GenRenderingRawFontButton     matlab.ui.control.Button
+        RenderingTextEditField        matlab.ui.control.EditField
+        RenderingTextEditFieldLabel   matlab.ui.control.Label
+        RenderingFontListBox          matlab.ui.control.ListBox
+        Label                         matlab.ui.control.Label
+        LinesListBox                  matlab.ui.control.ListBox
+        LinesListBoxLabel             matlab.ui.control.Label
+        StrokesListBox                matlab.ui.control.ListBox
+        StrokesListBoxLabel           matlab.ui.control.Label
+        DisplayFont                   matlab.ui.control.UIAxes
+    end
+
+
+    properties (Access = private)
+        RenderingText
+        RenderingFonts% 描画するフォントのデータセット
+        SelectFontNo=1 %選択中のフォント番号
+        SelectStrokeNo=1 % 選択中のストローク番号
+        SelectLineNo=1 % 選択中のLine番号(各ストロークで1から附番)
+    end
+
+    methods (Access = private)
+        %フォントプロット領域にフォントをプロットする        
+        function PrintFontDisp(app , Font , EmphasisStrokeNo , EmphashisLineNo)
+            % Font:フォント変数
+            % EmphasisStrokeNo:強調するStrokeの番号 (0の時は何も強調しない)
+            % EmphasisLineNo :強調するStroke内のLine番号(0の時は何もしない)
+            cla(app.DisplayFont);
+            hold(app.DisplayFont , 'on');
+            axis(app.DisplayFont,'equal');
+            for i = 1:size(Font.Lines,1)
+                if EmphasisStrokeNo == Font.StrokeNo(i)
+                    color = "red";
+
+                    if EmphashisLineNo == Font.LineNo(i)
+                        line_width = 4;
+                    else
+                        line_width = 2;
+                    end
+                else
+                    color = "black";
+                    line_width = 2;
+                end
+                % 矢印付きプロット
+                quiver(app.DisplayFont, ...
+                    Font.Lines(i,1) , Font.Lines(i,3),...
+                    Font.Lines(i,2) - Font.Lines(i,1) , ...
+                    Font.Lines(i,4 ) - Font.Lines(i,3), ...
+                    'color' , color , 'LineWidth',line_width);
+
+                % 線プロット
+                % plot(app.DisplayFont, Font.Lines(i,1:2) , Font.Lines(i,3:4), 'k-',...
+                %     'color' , color , 'LineWidth',line_width);
+            end
+            xlim(app.DisplayFont , [0-1 29+1]); ylim(app.DisplayFont,[0-1,31+1]);
+        end
+
+        %% LineNoを割り振り直す
+        function RenewLineNo(app)
+            app.RenderingFonts{app.SelectFontNo}.LineNo = 1:size(app.RenderingFonts{app.SelectFontNo}.LineNo , 2);
+        end
+
+        %% StrokeNoを割り振り直す
+        function RenewStrokeNo(app)
+            stk_no_cnt = 1;
+            tmp_stk_no = stk_no_cnt;
+            for i = 2:size(app.RenderingFonts{app.SelectFontNo}.StrokeNo , 2)
+                if app.RenderingFonts{app.SelectFontNo}.StrokeNo(i) ...
+                        ~= app.RenderingFonts{app.SelectFontNo}.StrokeNo(i-1)
+                    stk_no_cnt = stk_no_cnt + 1;
+                end
+
+                tmp_stk_no(i) = stk_no_cnt;
+            end
+
+            app.RenderingFonts{app.SelectFontNo}.StrokeNo = tmp_stk_no;
+        end
+        
+        %% RenderingFontListBoxの表示を更新する
+        function RedrawRenderingFontListBox(app)
+            app.RenderingFontListBox.Items={''}; %初期化
+            tempItems = [];
+            for i=1:length(app.RenderingText)
+                tempItems = [tempItems , cellstr( extractBetween(app.RenderingText , i , i))];
+            end
+            app.RenderingFontListBox.Items = tempItems;
+        end
+
+        %% StrokesListBoxの表示を更新する
+        function RedrawStrokesListBox(app)
+            idx = app.SelectFontNo;
+            tempItems = [];
+            unique_stroke_no = unique(app.RenderingFonts{idx}.StrokeNo);
+            for i=1:length(unique_stroke_no)
+                tempItems = [tempItems , ...
+                    sprintf("Stroke:%d",unique_stroke_no(i))];
+            end
+            app.StrokesListBox.Items = tempItems;
+        end
+        
+        %% LinesListBoxの表示を更新する
+        function RedrawLinesListBox(app)
+            if app.SelectStrokeNo == 0
+                return
+            end
+
+            tempItems = [];
+            idx_select_stroke_line = (app.RenderingFonts{app.SelectFontNo}.StrokeNo == app.SelectStrokeNo);
+            for i=app.RenderingFonts{app.SelectFontNo}.LineNo(idx_select_stroke_line)
+                tempItems = [tempItems , ...
+                    sprintf("%d", app.RenderingFonts{app.SelectFontNo}.LineNo(i) )];
+            end
+            app.LinesListBox.Items = tempItems;
+        end
+        
+        %% 画面表示を更新する
+        function UpdateDisplay(app)
+            % フォント再描画
+            PrintFontDisp(app , app.RenderingFonts{app.SelectFontNo} , ...
+                app.SelectStrokeNo , app.SelectLineNo);
+
+            % StrokesListBoxの表示を更新する
+            RedrawStrokesListBox(app);
+
+            % LinesListBoxの表示を更新する
+            RedrawLinesListBox(app);
+
+            % EndTypeの表示を更新する
+            app.EndTypeDropDown.Value = char(app.RenderingFonts{app.SelectFontNo}.EndType(app.SelectLineNo));
+        end
+    end
+
+
+    % Callbacks that handle component events
+    methods (Access = private)
+
+        % Menu selected function: Menu_Open
+        function Menu_OpenSelected(app, event)
+            % ファイルを開く
+            [file, path] = uigetfile('*.mat', '開く');
+
+            % キャンセルされた場合は何もしない
+            if isempty(file)
+                return
+            end
+
+            % 開くファイルのフルパスを作成
+            fullFileName = fullfile(path, file);
+
+            % データを読み込む
+            load(fullFileName);
+            app.RenderingText = RenderingText;
+            app.RenderingFonts = RenderingFonts;
+            
+            % 描画文字の表示
+            RedrawRenderingFontListBox(app);
+
+            % 画面更新
+            UpdateDisplay(app);
+        end
+
+        % Button pushed function: GenRenderingRawFontButton
+        function GenRenderingRawFontButtonPushed(app, event)
+            app.RenderingText = app.RenderingTextEditField.Value;
+
+            % 描画対象の文字列が空白の時は何もしない
+            if isempty(app.RenderingText)
+                return ;
+            end
+
+            % Font生成ボタンを１回しか押せないように無効化する
+            app.GenRenderingRawFontButton.Enable = false;
+
+            %% 文字単位でリストに追加
+            RedrawRenderingFontListBox(app);
+
+            %% 描画する文字列をフォントデータ(数値データ)として得る
+            % フォント(KST32.TXT)のパス
+            KST32Path = "./KST32Bv3/KST32B.TXT";
+            % 出力倍率
+            RenderingScale = 1;
+
+            %データ構造 [begin_x , end_x , begin_y ,  end_y](開始座標,終点座標)4点を１行とする
+            for idx_char=1:length(app.RenderingText)
+                % セル配列で受け取らないといけないのなぜ？
+                app.RenderingFonts{idx_char} = GetFontChar( app.RenderingText(idx_char) ,KST32Path);
+
+                % フォントスケール変更
+                app.RenderingFonts{idx_char}.Lines = app.RenderingFonts{idx_char}.Lines;
+            end
+        end
+
+        % Value changed function: RenderingFontListBox
+        function RenderingFontListBoxValueChanged(app, event)
+            app.SelectFontNo = event.ValueIndex; %選択されたインデックスを取得
+            
+            % 画面更新
+            UpdateDisplay(app);
+        end
+
+        % Value changed function: StrokesListBox
+        function StrokesListBoxValueChanged(app, event)
+            app.SelectStrokeNo = event.ValueIndex;
+            %Stroke選択変更時は強制的にそのStrokeの先頭Line選択
+            tmp_idx = app.RenderingFonts{app.SelectFontNo}.StrokeNo == app.SelectStrokeNo;
+            tmp_LineNo = app.RenderingFonts{app.SelectFontNo}.LineNo(tmp_idx);
+            app.SelectLineNo = tmp_LineNo(1); 
+
+            % 画面更新
+            UpdateDisplay(app);
+        end
+
+        % Value changed function: LinesListBox
+        function LinesListBoxValueChanged(app, event)
+            app.SelectLineNo = str2double(event.Value);
+
+            % 画面更新
+            UpdateDisplay(app);
+        end
+
+        % Button pushed function: InvDirectionButton
+        function InvDirectionButtonPushed(app, event)
+            % 選択されているLineの向きを反転する
+            if app.SelectFontNo == 0 || app.SelectStrokeNo == 0 || app.SelectLineNo == 0
+                % Lineが選択されていない場合は何もしない
+                return
+            end
+
+            % 反転処理
+            temp = app.RenderingFonts{app.SelectFontNo}.Lines(app.SelectLineNo,1:4);
+            temp = [temp(2),temp(1),temp(4),temp(3)];
+            app.RenderingFonts{app.SelectFontNo}.Lines(app.SelectLineNo,:) = temp;
+
+            % 画面更新
+            UpdateDisplay(app);
+        end
+
+        % Button pushed function: StrokeUpButton
+        function StrokeUpButtonPushed(app, event)
+            % 選択中のStrokeを1つ上のStrokeと入れ替える
+            % ※Stroke1を選択中の場合は何もしない
+            if app.SelectStrokeNo <= 1
+                return
+            end
+
+            % 選択中のStrokeNoのインデックスを抜き出す
+            idx_n = app.RenderingFonts{app.SelectFontNo}.StrokeNo == app.SelectStrokeNo;
+
+            % 入れ替える対象(1個上)のインデックスを抜き出す
+            idx_n_1 = app.RenderingFonts{app.SelectFontNo}.StrokeNo == app.SelectStrokeNo-1;
+
+            % 入れ替える対象範囲全体のインデックス
+            idx_changes = or(idx_n , idx_n_1);
+
+            % 対象範囲で入れ替えた結果(一時)
+            tempLines = [app.RenderingFonts{app.SelectFontNo}.Lines(idx_n,:);app.RenderingFonts{app.SelectFontNo}.Lines(idx_n_1,:)];
+            tempStrokeNo = [app.RenderingFonts{app.SelectFontNo}.StrokeNo(idx_n)-1,app.RenderingFonts{app.SelectFontNo}.StrokeNo(idx_n_1)+1];
+            app.RenderingFonts{app.SelectFontNo}.Lines(idx_changes,:) = tempLines;
+            app.RenderingFonts{app.SelectFontNo}.StrokeNo(idx_changes) = tempStrokeNo;
+
+            % 選択中のStroke,Lineリストは初期化する
+            app.SelectLineNo = 1;
+            app.SelectStrokeNo = 1;
+
+            % LineNoの再割り振り
+            RenewLineNo(app);
+            % StrokeNoの再割り振り
+            RenewStrokeNo(app);
+
+            % 画面更新
+            UpdateDisplay(app);
+        end
+
+        % Button pushed function: StrokeDownButton
+        function StrokeDownButtonPushed(app, event)
+            % 選択中のStrokeを1つ下のStrokeと入れ替える
+            % ※最後のStrokeを選択中の場合は何もしない
+            if app.SelectStrokeNo >= app.RenderingFonts{app.SelectFontNo}.StrokeNo(end)
+                return
+            end
+
+            % 選択中のStrokeNoのインデックスを抜き出す
+            idx_n = app.RenderingFonts{app.SelectFontNo}.StrokeNo == app.SelectStrokeNo;
+
+            % 入れ替える対象(1個下)のインデックスを抜き出す
+            idx_n_1 = app.RenderingFonts{app.SelectFontNo}.StrokeNo == app.SelectStrokeNo+1;
+
+            % 入れ替える対象範囲全体のインデックス
+            idx_changes = or(idx_n , idx_n_1);
+
+            % 対象範囲で入れ替えた結果(一時)
+            tempLines = [app.RenderingFonts{app.SelectFontNo}.Lines(idx_n_1,:);app.RenderingFonts{app.SelectFontNo}.Lines(idx_n,:)];
+            tempStrokeNo = [app.RenderingFonts{app.SelectFontNo}.StrokeNo(idx_n_1)-1 , app.RenderingFonts{app.SelectFontNo}.StrokeNo(idx_n)+1];
+            app.RenderingFonts{app.SelectFontNo}.Lines(idx_changes,:) = tempLines;
+            app.RenderingFonts{app.SelectFontNo}.StrokeNo(idx_changes) = tempStrokeNo;
+           
+            % 選択中のStroke,Lineリストは初期化する
+            app.SelectLineNo = 1;
+            app.SelectStrokeNo = app.RenderingFonts{app.SelectFontNo}.StrokeNo(end);
+
+            % LineNoの再割り振り
+            RenewLineNo(app);
+            % StrokeNoの再割り振り
+            RenewStrokeNo(app);
+
+            % 画面更新
+            UpdateDisplay(app);
+        end
+
+        % Button pushed function: LineUpWithinStrokeButton
+        function LineUpWithinStrokeButtonPushed(app, event)
+            % 1番目のLineの場合は何もしない
+            if app.RenderingFonts{app.SelectFontNo}.LineNo( app.SelectLineNo ) <= 1
+                return
+            end
+
+            % １つ上のLineが同一ストローク内の場合のみ１つ上のLineと入れ替える
+            if app.RenderingFonts{app.SelectFontNo}.StrokeNo( app.SelectLineNo ) ...
+                    ~= app.RenderingFonts{app.SelectFontNo}.StrokeNo( app.SelectLineNo - 1 )
+                return
+            end
+
+            % 1つ上のLineと入れ替える
+            % (同一ストローク内であることは上で補償している)
+            temp = app.RenderingFonts{app.SelectFontNo}.Lines( app.SelectLineNo , :);
+            app.RenderingFonts{app.SelectFontNo}.Lines( app.SelectLineNo , :) ...
+                = app.RenderingFonts{app.SelectFontNo}.Lines( app.SelectLineNo - 1 , :);
+            app.RenderingFonts{app.SelectFontNo}.Lines( app.SelectLineNo - 1 , :) = temp;
+
+            % LineNoの再割り振り
+            RenewLineNo(app);
+            % StrokeNoの再割り振り
+            RenewStrokeNo(app);
+
+            % 画面更新
+            UpdateDisplay(app);
+        end
+
+        % Button pushed function: LineDownWithinStrokeButton
+        function LineDownWithinStrokeButtonPushed(app, event)
+            % 最後のLineの場合は何もしない
+            if app.RenderingFonts{app.SelectFontNo}.LineNo( app.SelectLineNo )...
+                    >= app.RenderingFonts{app.SelectFontNo}.StrokeNo(end)
+                return
+            end
+
+            % １つ下のLineが同一ストローク内の場合のみ１つ下のLineと入れ替える
+            if app.RenderingFonts{app.SelectFontNo}.StrokeNo( app.SelectLineNo ) ...
+                    ~= app.RenderingFonts{app.SelectFontNo}.StrokeNo( app.SelectLineNo + 1 )
+                return
+            end
+
+            % 1つ上のLineと入れ替える
+            % (同一ストローク内であることは上で補償している)
+            temp = app.RenderingFonts{app.SelectFontNo}.Lines( app.SelectLineNo , :);
+            app.RenderingFonts{app.SelectFontNo}.Lines( app.SelectLineNo , :) ...
+                = app.RenderingFonts{app.SelectFontNo}.Lines( app.SelectLineNo + 1 , :);
+            app.RenderingFonts{app.SelectFontNo}.Lines( app.SelectLineNo + 1 , :) = temp;
+
+            % LineNoの再割り振り
+            RenewLineNo(app);
+            % StrokeNoの再割り振り
+            RenewStrokeNo(app);
+
+            % 画面更新
+            UpdateDisplay(app);
+        end
+
+        % Button pushed function: MoveLineNewStrokeButton
+        function MoveLineNewStrokeButtonPushed(app, event)
+            tmp_font = app.RenderingFonts{app.SelectFontNo};
+            % 選択中ストロークのインデックス範囲を確認する
+            sel_idx = tmp_font.LineNo( tmp_font.StrokeNo == app.SelectStrokeNo );
+
+            % 範囲のLine順序を入れ替える
+            tmp_lines = [tmp_font.Lines(1:app.SelectLineNo-1 , :);
+                tmp_font.Lines( app.SelectLineNo+1:sel_idx(end) , :);
+                tmp_font.Lines( app.SelectLineNo , :);
+                tmp_font.Lines( sel_idx(end)+1:end , :)];
+
+            % LineNoは下で強制的に再割り振りするので更新不要、StrokeNoはストローク再割り振りのために不連続な値とする
+            app.RenderingFonts{app.SelectFontNo}.Lines = tmp_lines;
+            app.RenderingFonts{app.SelectFontNo}.StrokeNo( sel_idx(end) ) = 0;
+
+            % LineNoの再割り振り
+            RenewLineNo(app);
+            % StrokeNoの再割り振り
+            RenewStrokeNo(app);
+
+            % 画面更新
+            UpdateDisplay(app);
+        end
+
+        % Button pushed function: MoveLinePreviousStrokeButton
+        function MoveLinePreviousStrokeButtonPushed(app, event)
+            % 現在strokeが1番目のstrokeの場合は何もしない
+            if app.SelectStrokeNo == 1
+                return 
+            end
+
+            tmp_font = app.RenderingFonts{app.SelectFontNo};
+            % 選択中ストロークのインデックス範囲を確認する
+            sel_idx = tmp_font.LineNo( tmp_font.StrokeNo == app.SelectStrokeNo );
+
+            % 範囲のLine順序を入れ替える
+            tmp_lines = [tmp_font.Lines(1:sel_idx(1)-1 , :);...
+                tmp_font.Lines( app.SelectLineNo , :);
+                tmp_font.Lines( sel_idx(1):app.SelectLineNo-1 , :);
+                tmp_font.Lines( app.SelectLineNo+1:end , :)];
+
+            % LineNoは下で強制的に再割り振りするので更新不要、StrokeNoはストローク再割り振りのために不連続な値とする
+            app.RenderingFonts{app.SelectFontNo}.Lines = tmp_lines;
+            app.RenderingFonts{app.SelectFontNo}.StrokeNo( sel_idx(1) ) = app.RenderingFonts{app.SelectFontNo}.StrokeNo( sel_idx(1)-1 );
+
+            % LineNoの再割り振り
+            RenewLineNo(app);
+            % StrokeNoの再割り振り
+            RenewStrokeNo(app);
+
+            % 画面更新
+            UpdateDisplay(app);
+        end
+
+        % Button pushed function: MoveLineNextStrokeButton
+        function MoveLineNextStrokeButtonPushed(app, event)
+            % 現在strokeが最終strokeの場合は何もしない
+            if app.SelectStrokeNo == app.RenderingFonts{app.SelectFontNo}.StrokeNo( end )
+                return 
+            end
+
+            tmp_font = app.RenderingFonts{app.SelectFontNo};
+            % 選択中ストロークのインデックス範囲を確認する
+            sel_idx = tmp_font.LineNo( tmp_font.StrokeNo == app.SelectStrokeNo );
+
+            % 範囲のLine順序を入れ替える
+            tmp_lines = [tmp_font.Lines(1:app.SelectLineNo-1 , :);
+                tmp_font.Lines( app.SelectLineNo+1:sel_idx(end) , :);
+                tmp_font.Lines( app.SelectLineNo , :);
+                tmp_font.Lines( sel_idx(end)+1:end , :)];
+
+            % LineNoは下で強制的に再割り振りするので更新不要、StrokeNoはストローク再割り振りのために不連続な値とする
+            app.RenderingFonts{app.SelectFontNo}.Lines = tmp_lines;
+            app.RenderingFonts{app.SelectFontNo}.StrokeNo( sel_idx(end) ) = app.RenderingFonts{app.SelectFontNo}.StrokeNo( sel_idx(end) ) + 1;
+
+            % LineNoの再割り振り
+            RenewLineNo(app);
+            % StrokeNoの再割り振り
+            RenewStrokeNo(app);
+
+            % 画面更新
+            UpdateDisplay(app);            
+        end
+
+        % Menu selected function: Menu_SaveWithName
+        function Menu_SaveWithNameSelected(app, event)
+            % 名前を付けて保存
+            [file, path] = uiputfile('*.mat', '名前を付けて保存');
+
+            % キャンセルされた場合は何もしない
+            if isempty(file)
+                return
+            end
+
+            % 保存するファイルのフルパスを作成
+            fullFileName = fullfile(path, file);
+
+            % データを保存
+            RenderingFonts = app.RenderingFonts; %app内だけ保存はできない？
+            RenderingText = app.RenderingText;
+            save(fullFileName,'RenderingFonts','RenderingText');
+        end
+
+        % Button pushed function: GenNCProgButton
+        function GenNCProgButtonPushed(app, event)
+            GenerateNCProgram('test.nc', app.RenderingText , app.RenderingFonts , 1);
+            disp('(ToDo)スケールを1固定中');
+        end
+
+        % Value changed function: EndTypeDropDown
+        function EndTypeDropDownValueChanged(app, event)
+            value = app.EndTypeDropDown.Value;
+            
+            % EndTypeを更新する
+            app.RenderingFonts{app.SelectFontNo}.EndType(app.SelectLineNo) = value;
+        end
+    end
+
+    % Component initialization
+    methods (Access = private)
+
+        % Create UIFigure and components
+        function createComponents(app)
+
+            % Create UIFigure and hide until all components are created
+            app.UIFigure = uifigure('Visible', 'off');
+            app.UIFigure.Position = [100 100 1000 600];
+            app.UIFigure.Name = 'MATLAB App';
+
+            % Create Menu
+            app.Menu = uimenu(app.UIFigure);
+            app.Menu.Text = 'ファイル';
+
+            % Create Menu_Open
+            app.Menu_Open = uimenu(app.Menu);
+            app.Menu_Open.MenuSelectedFcn = createCallbackFcn(app, @Menu_OpenSelected, true);
+            app.Menu_Open.Text = '開く';
+
+            % Create Menu_OverwriteSave
+            app.Menu_OverwriteSave = uimenu(app.Menu);
+            app.Menu_OverwriteSave.Text = '上書き保存';
+
+            % Create Menu_SaveWithName
+            app.Menu_SaveWithName = uimenu(app.Menu);
+            app.Menu_SaveWithName.MenuSelectedFcn = createCallbackFcn(app, @Menu_SaveWithNameSelected, true);
+            app.Menu_SaveWithName.Text = '名前を付けて保存';
+
+            % Create DisplayFont
+            app.DisplayFont = uiaxes(app.UIFigure);
+            title(app.DisplayFont, 'Font')
+            xlabel(app.DisplayFont, 'X')
+            ylabel(app.DisplayFont, 'Y')
+            zlabel(app.DisplayFont, 'Z')
+            app.DisplayFont.TitleFontWeight = 'bold';
+            app.DisplayFont.Position = [25 161 391 402];
+
+            % Create StrokesListBoxLabel
+            app.StrokesListBoxLabel = uilabel(app.UIFigure);
+            app.StrokesListBoxLabel.HorizontalAlignment = 'right';
+            app.StrokesListBoxLabel.Position = [451 557 46 22];
+            app.StrokesListBoxLabel.Text = 'Strokes';
+
+            % Create StrokesListBox
+            app.StrokesListBox = uilistbox(app.UIFigure);
+            app.StrokesListBox.Items = {};
+            app.StrokesListBox.ValueChangedFcn = createCallbackFcn(app, @StrokesListBoxValueChanged, true);
+            app.StrokesListBox.Position = [449 194 129 352];
+            app.StrokesListBox.Value = {};
+
+            % Create LinesListBoxLabel
+            app.LinesListBoxLabel = uilabel(app.UIFigure);
+            app.LinesListBoxLabel.HorizontalAlignment = 'right';
+            app.LinesListBoxLabel.Position = [628 557 34 22];
+            app.LinesListBoxLabel.Text = 'Lines';
+
+            % Create LinesListBox
+            app.LinesListBox = uilistbox(app.UIFigure);
+            app.LinesListBox.Items = {};
+            app.LinesListBox.ValueChangedFcn = createCallbackFcn(app, @LinesListBoxValueChanged, true);
+            app.LinesListBox.Position = [614 194 129 352];
+            app.LinesListBox.Value = {};
+
+            % Create Label
+            app.Label = uilabel(app.UIFigure);
+            app.Label.HorizontalAlignment = 'right';
+            app.Label.Position = [319 130 84 22];
+            app.Label.Text = 'RenderingFont';
+
+            % Create RenderingFontListBox
+            app.RenderingFontListBox = uilistbox(app.UIFigure);
+            app.RenderingFontListBox.Items = {};
+            app.RenderingFontListBox.ValueChangedFcn = createCallbackFcn(app, @RenderingFontListBoxValueChanged, true);
+            app.RenderingFontListBox.Position = [311 12 100 110];
+            app.RenderingFontListBox.Value = {};
+
+            % Create RenderingTextEditFieldLabel
+            app.RenderingTextEditFieldLabel = uilabel(app.UIFigure);
+            app.RenderingTextEditFieldLabel.HorizontalAlignment = 'right';
+            app.RenderingTextEditFieldLabel.Position = [41 99 86 22];
+            app.RenderingTextEditFieldLabel.Text = 'Rendering Text';
+
+            % Create RenderingTextEditField
+            app.RenderingTextEditField = uieditfield(app.UIFigure, 'text');
+            app.RenderingTextEditField.Position = [142 99 100 22];
+
+            % Create GenRenderingRawFontButton
+            app.GenRenderingRawFontButton = uibutton(app.UIFigure, 'push');
+            app.GenRenderingRawFontButton.ButtonPushedFcn = createCallbackFcn(app, @GenRenderingRawFontButtonPushed, true);
+            app.GenRenderingRawFontButton.Position = [41 58 141 23];
+            app.GenRenderingRawFontButton.Text = 'GenRenderingRawFont';
+
+            % Create InvDirectionButton
+            app.InvDirectionButton = uibutton(app.UIFigure, 'push');
+            app.InvDirectionButton.ButtonPushedFcn = createCallbackFcn(app, @InvDirectionButtonPushed, true);
+            app.InvDirectionButton.Position = [764 523 100 23];
+            app.InvDirectionButton.Text = 'InvDirection';
+
+            % Create StrokeUpButton
+            app.StrokeUpButton = uibutton(app.UIFigure, 'push');
+            app.StrokeUpButton.ButtonPushedFcn = createCallbackFcn(app, @StrokeUpButtonPushed, true);
+            app.StrokeUpButton.Position = [464 151 100 23];
+            app.StrokeUpButton.Text = 'StrokeUp';
+
+            % Create StrokeDownButton
+            app.StrokeDownButton = uibutton(app.UIFigure, 'push');
+            app.StrokeDownButton.ButtonPushedFcn = createCallbackFcn(app, @StrokeDownButtonPushed, true);
+            app.StrokeDownButton.Position = [464 117 100 23];
+            app.StrokeDownButton.Text = 'StrokeDown';
+
+            % Create MoveLineNewStrokeButton
+            app.MoveLineNewStrokeButton = uibutton(app.UIFigure, 'push');
+            app.MoveLineNewStrokeButton.ButtonPushedFcn = createCallbackFcn(app, @MoveLineNewStrokeButtonPushed, true);
+            app.MoveLineNewStrokeButton.Position = [617 12 126 23];
+            app.MoveLineNewStrokeButton.Text = 'MoveLineNewStroke';
+
+            % Create LineUpWithinStrokeButton
+            app.LineUpWithinStrokeButton = uibutton(app.UIFigure, 'push');
+            app.LineUpWithinStrokeButton.ButtonPushedFcn = createCallbackFcn(app, @LineUpWithinStrokeButtonPushed, true);
+            app.LineUpWithinStrokeButton.Position = [618 151 121 23];
+            app.LineUpWithinStrokeButton.Text = 'LineUpWithinStroke';
+
+            % Create LineDownWithinStrokeButton
+            app.LineDownWithinStrokeButton = uibutton(app.UIFigure, 'push');
+            app.LineDownWithinStrokeButton.ButtonPushedFcn = createCallbackFcn(app, @LineDownWithinStrokeButtonPushed, true);
+            app.LineDownWithinStrokeButton.Position = [618 117 136 23];
+            app.LineDownWithinStrokeButton.Text = 'LineDownWithinStroke';
+
+            % Create MoveLineNextStrokeButton
+            app.MoveLineNextStrokeButton = uibutton(app.UIFigure, 'push');
+            app.MoveLineNextStrokeButton.ButtonPushedFcn = createCallbackFcn(app, @MoveLineNextStrokeButtonPushed, true);
+            app.MoveLineNextStrokeButton.Position = [618 53 126 23];
+            app.MoveLineNextStrokeButton.Text = 'MoveLineNextStroke';
+
+            % Create MoveLinePreviousStrokeButton
+            app.MoveLinePreviousStrokeButton = uibutton(app.UIFigure, 'push');
+            app.MoveLinePreviousStrokeButton.ButtonPushedFcn = createCallbackFcn(app, @MoveLinePreviousStrokeButtonPushed, true);
+            app.MoveLinePreviousStrokeButton.Position = [618 83 148 23];
+            app.MoveLinePreviousStrokeButton.Text = 'MoveLinePreviousStroke';
+
+            % Create GenNCProgButton
+            app.GenNCProgButton = uibutton(app.UIFigure, 'push');
+            app.GenNCProgButton.ButtonPushedFcn = createCallbackFcn(app, @GenNCProgButtonPushed, true);
+            app.GenNCProgButton.Position = [863 82 100 23];
+            app.GenNCProgButton.Text = 'GenNCProg';
+
+            % Create EndTypeDropDownLabel
+            app.EndTypeDropDownLabel = uilabel(app.UIFigure);
+            app.EndTypeDropDownLabel.HorizontalAlignment = 'right';
+            app.EndTypeDropDownLabel.Position = [765 459 52 22];
+            app.EndTypeDropDownLabel.Text = 'EndType';
+
+            % Create EndTypeDropDown
+            app.EndTypeDropDown = uidropdown(app.UIFigure);
+            app.EndTypeDropDown.Items = {'None', 'Tome', 'Hane', 'Harai'};
+            app.EndTypeDropDown.ValueChangedFcn = createCallbackFcn(app, @EndTypeDropDownValueChanged, true);
+            app.EndTypeDropDown.Position = [832 459 100 22];
+            app.EndTypeDropDown.Value = 'None';
+
+            % Show the figure after all components are created
+            app.UIFigure.Visible = 'on';
+        end
+    end
+
+    % App creation and deletion
+    methods (Access = public)
+
+        % Construct app
+        function app = BrushPenPlotterCAM
+
+            % Create UIFigure and components
+            createComponents(app)
+
+            % Register the app with App Designer
+            registerApp(app, app.UIFigure)
+
+            if nargout == 0
+                clear app
+            end
+        end
+
+        % Code that executes before app deletion
+        function delete(app)
+
+            % Delete UIFigure when app is deleted
+            delete(app.UIFigure)
+        end
+    end
+end
