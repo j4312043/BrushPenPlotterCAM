@@ -1,11 +1,13 @@
 function GenerateNCProgram(fullFile , RenderingText , RenderingFonts , Scale)
 %GENERATENCPROGRAM この関数の概要をここに記述
 %   詳細説明をここに記述
+Scale = 0.5;
+disp("デバッグ用にScale決め打ち中");
 %% NCコード生成設定
 % (Z=0を紙とペンが接触する位置とする)
 disp('(ToDo)GenerateNCProgram内で生成条件をハードコーディング中');
 SafeZ = 2; % Z方向退避座標
-PlotZ = -1; % Z方向書き込み字座標
+PlotZ = -3*Scale; % Z方向書き込み字座標
 PlotFeed = 500;
 
 %% ---------------
@@ -24,14 +26,14 @@ end
 % for k = 1:length(RenderingFonts)
 %     for i = 1:size(RenderingFonts{k}.Lines,1)
 %         % plot(RenderingFonts(k).points(i,1:2) , RenderingFonts(k).points(i,3:4), 'k-', 'LineWidth', 2);
-% 
+%
 %         % 矢印付きプロット
 %         quiver(RenderingFonts{k}.Lines(i,1) , RenderingFonts{k}.Lines(i,3),...
 %             RenderingFonts{k}.Lines(i,2) -RenderingFonts{k}.Lines(i,1) , ...
 %             RenderingFonts{k}.Lines(i,4 )- RenderingFonts{k}.Lines(i,3));
 %     end
 % end
-% 
+%
 % axis equal;
 % % xlim([0 29*length(RenderingFonts)]);  ylim([0,31]);
 % xlim([0 29]);  ylim([0,31*length(RenderingFonts)]);
@@ -59,16 +61,17 @@ for idx_char = 1:length(RenderingFonts)
     for idx_stk = unique(Font.StrokeNo)
         idx_line = Font.LineNo(Font.StrokeNo == idx_stk);
 
-        % 最終Lineだけはトメ・ハネ・ハライに応じて変更する
-        for i=1:length(idx_line)-1
+        % Line末尾をトメ・ハネ・ハライに応じて変更する
+        for i=1:length(idx_line)
             % 始点に移動
             NCCodes(end+1) = sprintf("G1X%f Y%f F%f",...
                 Font.Lines(idx_line(i),1) , Font.Lines(idx_line(i),3),...
                 PlotFeed);
             % ペン下す(同一zなら何回下げても変わらないので1行無駄になるけど可読性重視)
-            NCCodes(end+1) = sprintf("G1Z%f F%f",PlotZ,200);
+            NCCodes(end+1) = sprintf("G1Z%f F%f",PlotZ,PlotFeed);
 
-            % % ストローク先頭は押しつけひき戻しする->効果なし
+            % ストローク先頭は打ち込みを入れる(押しつけひき戻しする->効果なし)
+            % (ToDo)上手く打ち込みできない https://kakakumag.com/houseware/?id=13182
             % if i==1
             %     NCCodes(end+1) = sprintf("G1Z%f F%f",PlotZ*1.2,200);
             %     NCCodes(end+1) = sprintf("G4P1");
@@ -76,87 +79,60 @@ for idx_char = 1:length(RenderingFonts)
             %     NCCodes(end+1) = sprintf("G4P1");
             % end
 
-            % 次の点に移動(描画)
-            NCCodes(end+1) = sprintf("G1X%f Y%f F%f",...
-                Font.Lines(idx_line(i),2) , Font.Lines(idx_line(i),4) ,...
-                PlotFeed);
+            switch (Font.EndType(idx_line(i)))
+                case "Ore"
+                    % 折れ角
+                    NCCodes(end+1) = sprintf("G1X%f Y%f F%f",...
+                        Font.Lines(idx_line(i),2) , Font.Lines(idx_line(i),4) ,...
+                        PlotFeed);
+
+                    NCCodes(end+1) = sprintf("G4P1");
+                    NCCodes(end+1) = sprintf("G1Z%f F%f",PlotZ*0.2,PlotFeed);
+                    NCCodes(end+1) = sprintf("G4P1");
+                    NCCodes(end+1) = sprintf("G1Z%f F%f",PlotZ,PlotFeed);                    
+                case "Tome"
+                    % 次の点に移動(描画)
+                    NCCodes(end+1) = sprintf("G1X%f Y%f F%f",...
+                        Font.Lines(idx_line(i),2) , Font.Lines(idx_line(i),4) ,...
+                        PlotFeed);
+
+                    % NCCodes(end+1) = sprintf("G4P1");
+                    NCCodes(end+1) = sprintf("G1Z%f F%f",PlotZ*1.4,PlotFeed/4);
+                    % NCCodes(end+1) = sprintf("G4P1");
+                case "Hane"
+                    % ハネ
+                    NCCodes(end+1) = sprintf("G4P1");
+                    NCCodes(end+1) = sprintf("G1X%f Y%f Z%f F%f",...
+                        Font.Lines(idx_line(i),2) , Font.Lines(idx_line(i),4) , 0 , ...
+                        PlotFeed);
+                case "Harai"
+                    % ラストストロークがsafeZとなるように放物線で上げるようにする
+                    plot_vector = [Font.Lines(idx_line(i),2)-Font.Lines(idx_line(i),1) , ...
+                        Font.Lines(idx_line(i),4)-Font.Lines(idx_line(i),3)];
+                    plot_vector = plot_vector .* 1;
+                    HaraiStart = [Font.Lines(idx_line(i),1), Font.Lines(idx_line(i),3)];
+
+                    HaraiDistance = norm(plot_vector); %ハライの距離(これはベクトルの向きに寄らず>0になることに注意)
+
+                    DivPoints = 10;
+                    HaraiL = linspace(0,HaraiDistance , DivPoints);
+                    alpha = (0-PlotZ) / HaraiDistance^2;
+
+                    for i=1:DivPoints
+                        NCCodes(end+1) = sprintf("G1X%fY%fZ%f F%f", ...
+                            HaraiStart(1) + (plot_vector(1)/DivPoints)*i,...
+                            HaraiStart(2) + (plot_vector(2)/DivPoints)*i , ...
+                            PlotZ+alpha*HaraiL(i)^2 , PlotFeed);
+                    end
+                otherwise
+                    % 次の点に移動(描画)
+                    NCCodes(end+1) = sprintf("G1X%f Y%f F%f",...
+                        Font.Lines(idx_line(i),2) , Font.Lines(idx_line(i),4) ,...
+                        PlotFeed);
+            end
         end
 
-        % ストローク内の最終Line+(ペン上げる)
-        i=length(idx_line);
-        switch (Font.EndType(idx_line(end)))
-            case "Tome"
-                % 始点に移動
-                NCCodes(end+1) = sprintf("G1X%f Y%f F%f",...
-                    Font.Lines(idx_line(i),1) , Font.Lines(idx_line(i),3),...
-                    PlotFeed);
-                % ペン下す(同一zなら何回下げても変わらないので1行無駄になるけど可読性重視)
-                NCCodes(end+1) = sprintf("G1Z%f F%f",PlotZ,200);
-                % 次の点に移動(描画)
-                NCCodes(end+1) = sprintf("G1X%f Y%f F%f",...
-                    Font.Lines(idx_line(i),2) , Font.Lines(idx_line(i),4) ,...
-                    PlotFeed);
-
-                % NCCodes(end+1) = sprintf("G4P1");
-                NCCodes(end+1) = sprintf("G1Z%f F%f",PlotZ*1.4,PlotFeed/4);
-                % NCCodes(end+1) = sprintf("G4P1");
-                NCCodes(end+1) = sprintf("G0Z%f",SafeZ);
-            case "Hane"
-                % 始点に移動
-                NCCodes(end+1) = sprintf("G1X%f Y%f F%f",...
-                    Font.Lines(idx_line(i),1) , Font.Lines(idx_line(i),3),...
-                    PlotFeed);
-                % ペン下す(同一zなら何回下げても変わらないので1行無駄になるけど可読性重視)
-                NCCodes(end+1) = sprintf("G1Z%f F%f",PlotZ,200);
-                % ハネ
-                NCCodes(end+1) = sprintf("G1X%f Y%f Z%f F%f",...
-                    Font.Lines(idx_line(i),2) , Font.Lines(idx_line(i),4) , SafeZ , ...
-                    PlotFeed);
-
-                NCCodes(end+1) = sprintf("G0Z%f",SafeZ);
-            case "Harai"
-                % 始点に移動
-                NCCodes(end+1) = sprintf("G1X%f Y%f F%f",...
-                    Font.Lines(idx_line(i),1) , Font.Lines(idx_line(i),3),...
-                    PlotFeed);
-                % ペン下す(同一zなら何回下げても変わらないので1行無駄になるけど可読性重視)
-                NCCodes(end+1) = sprintf("G1Z%f F%f",PlotZ,200);                
-
-                % ラストストロークがsafeZとなるように放物線で上げるようにする
-                plot_vector = [Font.Lines(idx_line(i),2)-Font.Lines(idx_line(i),1) , ...
-                    Font.Lines(idx_line(i),4)-Font.Lines(idx_line(i),3)];
-                plot_vector = plot_vector .* 1;
-                HaraiStart = [Font.Lines(idx_line(i),1), Font.Lines(idx_line(i),3)];
-
-                HaraiDistance = norm(plot_vector); %ハライの距離(これはベクトルの向きに寄らず>0になることに注意)
-                
-                DivPoints = 10;
-                HaraiL = linspace(0,HaraiDistance , DivPoints);
-                % alpha = (SafeZ-PlotZ) / HaraiDistance^2;                
-                alpha = (0-PlotZ) / HaraiDistance^2;
-
-                for i=1:DivPoints
-                    NCCodes(end+1) = sprintf("G1X%fY%fZ%f F%f", ...
-                        HaraiStart(1) + (plot_vector(1)/DivPoints)*i,...
-                        HaraiStart(2) + (plot_vector(2)/DivPoints)*i , ...
-                        PlotZ+alpha*HaraiL(i)^2 , PlotFeed);
-                end
-
-                NCCodes(end+1) = sprintf("G0Z%f",SafeZ);
-            otherwise 
-                % 始点に移動
-                NCCodes(end+1) = sprintf("G1X%f Y%f F%f",...
-                    Font.Lines(idx_line(i),1) , Font.Lines(idx_line(i),3),...
-                    PlotFeed);
-                % ペン下す(同一zなら何回下げても変わらないので1行無駄になるけど可読性重視)
-                NCCodes(end+1) = sprintf("G1Z%f F%f",PlotZ,200);
-                % 次の点に移動(描画)
-                NCCodes(end+1) = sprintf("G1X%f Y%f F%f",...
-                    Font.Lines(idx_line(i),2) , Font.Lines(idx_line(i),4) ,...
-                    PlotFeed);
-
-                NCCodes(end+1) = sprintf("G0Z%f",SafeZ);
-        end        
+        NCCodes(end+1) = sprintf("G0Z%f",SafeZ);
     end
 end
 

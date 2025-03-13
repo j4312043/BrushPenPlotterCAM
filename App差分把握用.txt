@@ -660,7 +660,7 @@ classdef BrushPenPlotterCAM < matlab.apps.AppBase
 
             % Create EndTypeDropDown
             app.EndTypeDropDown = uidropdown(app.UIFigure);
-            app.EndTypeDropDown.Items = {'None', 'Tome', 'Hane', 'Harai'};
+            app.EndTypeDropDown.Items = {'None', 'Tome', 'Hane', 'Harai', 'Ore'};
             app.EndTypeDropDown.ValueChangedFcn = createCallbackFcn(app, @EndTypeDropDownValueChanged, true);
             app.EndTypeDropDown.Position = [832 459 100 22];
             app.EndTypeDropDown.Value = 'None';
