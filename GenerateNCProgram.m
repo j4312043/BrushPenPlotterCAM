@@ -102,6 +102,13 @@ for idx_char = 1:length(RenderingFonts)
                 % NCCodes(end+1) = sprintf("G4P1");
                 NCCodes(end+1) = sprintf("G0Z%f",SafeZ);
             case "Hane"
+                % 始点に移動
+                NCCodes(end+1) = sprintf("G1X%f Y%f F%f",...
+                    Font.Lines(idx_line(i),1) , Font.Lines(idx_line(i),3),...
+                    PlotFeed);
+                % ペン下す(同一zなら何回下げても変わらないので1行無駄になるけど可読性重視)
+                NCCodes(end+1) = sprintf("G1Z%f F%f",PlotZ,200);
+                % ハネ
                 NCCodes(end+1) = sprintf("G1X%f Y%f Z%f F%f",...
                     Font.Lines(idx_line(i),2) , Font.Lines(idx_line(i),4) , SafeZ , ...
                     PlotFeed);
